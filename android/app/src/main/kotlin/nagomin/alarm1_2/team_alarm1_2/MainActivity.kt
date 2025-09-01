@@ -1,4 +1,4 @@
-package your.package.name
+package nagomin.alarm1_2.team_alarm1_2
 
 import android.app.AlarmManager
 import android.content.Context

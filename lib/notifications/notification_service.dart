@@ -25,8 +25,9 @@ class NotificationService {
       await _fln.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
           ?.requestPermissions(alert: true, badge: true, sound: true);
     } else if (Platform.isAndroid) {
-      await _fln.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-          ?.requestPermission();
+      _fln
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
     }
   }
 
@@ -41,7 +42,8 @@ class NotificationService {
       category: AndroidNotificationCategory.alarm, fullScreenIntent: true,
     );
     const ios = DarwinNotificationDetails(
-      presentAlert: true, presentSound: true, interruptionLevel: InterruptionLevel.timeSensitive,
+      presentAlert: true,
+      presentSound: true,
     );
     await _fln.zonedSchedule(
       id, title ?? 'おはようの時間です', body ?? 'グリッドに投稿しましょう', t,
@@ -61,7 +63,10 @@ class NotificationService {
       importance: Importance.max, priority: Priority.high, playSound: true,
       category: AndroidNotificationCategory.alarm, fullScreenIntent: true,
     );
-    const ios = DarwinNotificationDetails(presentAlert: true, presentSound: true, interruptionLevel: InterruptionLevel.timeSensitive);
+    const ios = DarwinNotificationDetails(
+      presentAlert: true,
+      presentSound: true,
+    );
     await _fln.zonedSchedule(
       id, title ?? 'スヌーズ', body ?? 'そろそろ起きる時間です', next,
       const NotificationDetails(android: android, iOS: ios),

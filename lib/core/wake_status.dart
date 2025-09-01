@@ -1,4 +1,6 @@
 //状態判断
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 enum WakeCellStatus { noAlarm, waiting, due, lateSuspicious, posted }
 
 class TodayAlarm {
