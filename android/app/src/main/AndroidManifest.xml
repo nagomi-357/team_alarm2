@@ -1,10 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="your.package.name">
+    xmlns:tools="http://schemas.android.com/tools"
+    package="nagomin.alarm1_2.team_alarm1_2">
 
     <uses-permission android:name="android.permission.INTERNET"/>
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" tools:targetApi="33"/>
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:targetApi="31"/>
 
     <application
         android:label="wakegrid"

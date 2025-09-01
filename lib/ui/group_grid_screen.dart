@@ -1,7 +1,6 @@
 //group_grid_screen.dart
 
 import 'dart:io';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -11,7 +10,7 @@ import '../data/storage_repo.dart';
 import '../ui/pickers/image_pick.dart';
 import '../models/group_settings.dart';
 import '../notifications/notification_service.dart';
-import '../android/exact_alarm.dart';
+import 'group_settings_screen.dart';
 
 class GroupGridScreen extends StatefulWidget {
   final String groupId;
@@ -47,6 +46,11 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
           appBar: AppBar(
             title: Text(data['name'] ?? 'グループ'),
             actions: [
+              IconButton(
+                icon: const Icon(Icons.alarm_add),
+                tooltip: 'アラーム設定',
+                onPressed: _setAlarm,
+              ),
               IconButton(
                 icon: const Icon(Icons.settings),
                 onPressed: () async {
@@ -114,6 +118,33 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
         );
       },
     );
+  }
+
+  Future<void> _setAlarm() async {
+    final now = DateTime.now();
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now),
+    );
+    if (picked == null) return;
+    var alarm = DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
+    if (alarm.isBefore(now)) {
+      alarm = alarm.add(const Duration(days: 1));
+    }
+    final nid = widget.myUid.hashCode ^ widget.groupId.hashCode;
+    await NotificationService.instance.scheduleAlarm(
+      id: nid,
+      alarmAtLocal: alarm,
+    );
+    await repo.setTodayAlarm(
+      widget.groupId,
+      widget.myUid,
+      alarmAt: alarm,
+      graceMins: _settings.graceMins,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('アラームをセットしました')));
   }
 
   Future<void> _wake(String uid) async {
