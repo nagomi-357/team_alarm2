@@ -1,4 +1,5 @@
 //data/group_repo.dart(Firebase操作)
+import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class GroupRepo {
@@ -73,4 +74,26 @@ class GroupRepo {
           if (snoozeWarnThreshold != null) 'snoozeWarnThreshold': snoozeWarnThreshold,
         }
       }, SetOptions(merge: true));
+  Future<String> createGroup(String name, String ownerUid) async {
+    final doc = _db.collection('groups').doc();
+    final code = (Random().nextInt(900000) + 100000).toString();
+    await doc.set({
+      'name': name,
+      'members': [ownerUid],
+      'admins': [ownerUid],
+      'inviteCode': code,
+      'gridActiveSince': FieldValue.serverTimestamp(),
+      'gridExpiresAt': FieldValue.serverTimestamp(),
+      'settings': {'graceMins': 10, 'snoozeStepMins': 5, 'snoozeWarnThreshold': 2},
+    });
+    return doc.id;
+  }
+
+  Future<String?> joinGroupByCode(String code, String uid) async {
+    final qs = await _db.collection('groups').where('inviteCode', isEqualTo: code).limit(1).get();
+    if (qs.docs.isEmpty) return null;
+    final ref = qs.docs.first.reference;
+    await ref.update({'members': FieldValue.arrayUnion([uid])});
+    return ref.id;
+  }
 }

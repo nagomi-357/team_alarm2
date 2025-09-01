@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'group_invite_screen.dart';
 
 import '../core/wake_status.dart';
 import '../data/group_repo.dart';
@@ -15,9 +16,8 @@ import '../android/exact_alarm.dart';
 
 class GroupGridScreen extends StatefulWidget {
   final String groupId;
-  final List<String> memberUids;
   final String myUid;
-  const GroupGridScreen({super.key, required this.groupId, required this.memberUids, required this.myUid});
+  const GroupGridScreen({super.key, required this.groupId, required this.myUid});
   @override State<GroupGridScreen> createState() => _GroupGridScreenState();
 }
 
@@ -36,9 +36,9 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
   Widget build(BuildContext context) {
     final groupRef = FirebaseFirestore.instance.collection('groups').doc(widget.groupId);
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: groupRef.snapshots(),
-      builder: (context, gsnap) {
+      stream: groupRef.snapshots(),      builder: (context, gsnap) {
         final data = gsnap.data?.data() ?? {};
+        final members = List<String>.from((data['members'] as List?) ?? const []);
         final admins = List<String>.from((data['admins'] as List?) ?? const []);
         _isAdmin = admins.contains(widget.myUid);
         _settings = GroupSettings.fromMap(data);
@@ -47,6 +47,12 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
           appBar: AppBar(
             title: Text(data['name'] ?? 'グループ'),
             actions: [
+              IconButton(
+                icon: const Icon(Icons.person_add),
+                onPressed: () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => GroupInviteScreen(groupId: widget.groupId),
+                )),
+              ),
               IconButton(
                 icon: const Icon(Icons.settings),
                 onPressed: () async {
@@ -63,7 +69,7 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
               ),
             ],
           ),
-          body: _buildStreams(),
+          body: _buildStreams(members),
           bottomNavigationBar: BottomAppBar(
             child: Row(
               children: [
@@ -77,7 +83,7 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
     );
   }
 
-  Widget _buildStreams() {
+  Widget _buildStreams(List<String> members) {
     return StreamBuilder<Map<String, Map<String, dynamic>>>(
       stream: repo.todayAlarmsStream(widget.groupId),
       builder: (_, asnap) {
@@ -91,9 +97,9 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 3, crossAxisSpacing: 8, mainAxisSpacing: 8, childAspectRatio: 1,
               ),
-              itemCount: widget.memberUids.length,
+              itemCount: members.length,
               itemBuilder: (_, i) {
-                final uid = widget.memberUids[i];
+                final uid = members[i];
                 final alarm = alarms[uid] != null ? TodayAlarm.fromMap(uid, {
                   ...alarms[uid]!, 'graceMins': (alarms[uid]?['graceMins'] as int?) ?? _settings.graceMins
                 }) : null;
