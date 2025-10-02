@@ -1,10 +1,14 @@
+//lib/main.dart
+
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-
-import 'ui/group_grid_screen.dart';
-import 'ui/chat_screen.dart';
-import 'ui/group_settings_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'data/auth_repo.dart';
+import 'data/user_repo.dart';
+import 'ui/group_list_screen.dart';
+import 'ui/profile/profile_screen.dart';
+import 'ui/invite/qr_join_screen.dart';
 import 'notifications/notification_service.dart';
 
 void main() async {
@@ -12,66 +16,50 @@ void main() async {
   await Firebase.initializeApp();
   await NotificationService.instance.init();
   await NotificationService.instance.requestPermissions();
-  runApp(const MyApp());
+  // 匿名ログイン
+  await AuthRepo.ensureSignedInAnon();
+
+  runApp(const RootApp());
+
+  Future.delayed(const Duration(seconds: 3), () async {
+    await NotificationService.instance.showNowTest();
+  });
 }
 
-// ★ デモ用：任意のユーザーIDを固定（本番はFirebase Authを入れてください）
-const demoMyUid = 'user_a';
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class RootApp extends StatelessWidget {
+  const RootApp({super.key});
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'WakeGrid',
       theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
-      home: const DemoHome(),
-      routes: {
-        '/chat': (_) => const SizedBox(),
-        '/settings': (_) => const SizedBox(),
+      onGenerateRoute: (settings) {
+        if (settings.name?.startsWith('/join') == true && settings.arguments is Uri) {
+          return MaterialPageRoute(builder: (_) => QRJoinScreen(uri: settings.arguments as Uri));
+        }
+        return null;
       },
+      home: const _Root(),
     );
   }
 }
 
-class DemoHome extends StatefulWidget {
-  const DemoHome({super.key});
-  @override
-  State<DemoHome> createState() => _DemoHomeState();
-}
-
-class _DemoHomeState extends State<DemoHome> {
-  String? groupId;
-  List<String> members = const ['user_a','user_b','user_c'];
-
+class _Root extends StatefulWidget { const _Root({super.key}); @override State<_Root> createState() => _RootState(); }
+class _RootState extends State<_Root> {
+  StreamSubscription? _sub;
   @override
   void initState() {
     super.initState();
-    _ensureDemoGroup();
+    // ディープリンク（wakegrid://join?...）を受け取る場合は、必要に応じてuni_linksなど導入
   }
-
-  Future<void> _ensureDemoGroup() async {
-    final db = FirebaseFirestore.instance;
-    final ref = db.collection('groups').doc('demo_group');
-    final doc = await ref.get();
-    if (!doc.exists) {
-      await ref.set({
-        'name': 'デモグループ',
-        'members': members,
-        'admins': ['user_a'],
-        'gridActiveSince': FieldValue.serverTimestamp(),
-        'gridExpiresAt': FieldValue.serverTimestamp(),
-        'settings': {'graceMins': 10, 'snoozeStepMins': 5, 'snoozeWarnThreshold': 2},
-      });
-    }
-    setState(() => groupId = 'demo_group');
-  }
+  @override
+  void dispose() { _sub?.cancel(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
-    if (groupId == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-    return GroupGridScreen(groupId: groupId!, memberUids: members, myUid: demoMyUid);
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    return GroupListScreen(myUid: uid,
+      onOpenProfile: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ProfileScreen(myUid: uid))),
+    );
   }
 }

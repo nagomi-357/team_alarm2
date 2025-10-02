@@ -1,3 +1,5 @@
+//models/models.dart（モデル共通）
+
 class GroupSettings {
   final int graceMins;
   final int snoozeStepMins;
@@ -12,5 +14,6 @@ class GroupSettings {
     );
   }
   Map<String, dynamic> toMap() => {'settings': {
-    'graceMins': graceMins, 'snoozeStepMins': snoozeStepMins, 'snoozeWarnThreshold': snoozeWarnThreshold}};
+    'graceMins': graceMins, 'snoozeStepMins': snoozeStepMins, 'snoozeWarnThreshold': snoozeWarnThreshold }};
 }
+
