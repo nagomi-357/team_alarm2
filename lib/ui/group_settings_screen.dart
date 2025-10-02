@@ -31,6 +31,10 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
   int _snooze = 5;
   int _warn = 2;
 
+  // デイリーリセット時刻（ローカル時刻）
+  int _resetHour = 4;   // 0-23
+  int _resetMinute = 0; // 0-59
+
   // Android: 正確なアラーム許可の確認（任意）
   bool? _exactOk;
   bool _checkingExact = false;
@@ -73,6 +77,8 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
         final curGrace = (g['settings']?['graceMins'] as int?) ?? _grace;
         final curSnooze = (g['settings']?['snoozeStepMins'] as int?) ?? _snooze;
         final curWarn = (g['settings']?['snoozeWarnThreshold'] as int?) ?? _warn;
+        final curResetH = (g['settings']?['resetHour'] as int?) ?? _resetHour;
+        final curResetM = (g['settings']?['resetMinute'] as int?) ?? _resetMinute;
 
         if (_nameCtl.text.isEmpty && !_dirty) _nameCtl.text = curName;
         _avatarUrl ??= curAvatar;
@@ -80,6 +86,8 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
           _grace = curGrace;
           _snooze = curSnooze;
           _warn = curWarn;
+          _resetHour = curResetH;
+          _resetMinute = curResetM;
         }
 
         return Scaffold(
@@ -187,6 +195,31 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
                 onChanged: isAdmin ? (v) { setState(() { _warn = v; _dirty = true; }); } : null,
               ),
 
+              // デイリーリセット時刻
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.schedule),
+                  title: const Text('デイリーリセット時刻'),
+                  subtitle: const Text('この時刻にグリッド（目標・起床・投稿）とタイムライン・アラームを初期化'),
+                  trailing: Text('${_resetHour.toString().padLeft(2, '0')}:${_resetMinute.toString().padLeft(2, '0')}'),
+                  onTap: isAdmin ? () async {
+                    final picked = await showTimePicker(
+                      context: context,
+                      initialTime: TimeOfDay(hour: _resetHour, minute: _resetMinute),
+                      helpText: 'リセット時刻を選択',
+                    );
+                    if (picked != null && mounted) {
+                      setState(() {
+                        _resetHour = picked.hour;
+                        _resetMinute = picked.minute;
+                        _dirty = true;
+                      });
+                    }
+                  } : null,
+                ),
+              ),
+              const SizedBox(height: 12),
+
               if (_saving)
                 const Padding(
                   padding: EdgeInsets.only(top: 16),
@@ -257,6 +290,8 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
         graceMins: _grace,
         snoozeStepMins: _snooze,
         snoozeWarnThreshold: _warn,
+        resetHour: _resetHour,
+        resetMinute: _resetMinute,
       );
 
       if (!mounted) return;

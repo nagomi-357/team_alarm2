@@ -3,7 +3,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-
+import 'package:cloud_firestore/cloud_firestore.dart';
 class GroupRepo {
   final _db = FirebaseFirestore.instance;
 
@@ -232,16 +232,52 @@ class GroupRepo {
     required int graceMins,
     required int snoozeStepMins,
     required int snoozeWarnThreshold,
+    required int resetHour,
+    required int resetMinute,
   }) {
     return _db.collection('groups').doc(groupId).set({
       'settings': {
         'graceMins': graceMins,
         'snoozeStepMins': snoozeStepMins,
         'snoozeWarnThreshold': snoozeWarnThreshold,
+        'resetHour': resetHour,
+        'resetMinute': resetMinute,
       }
     }, SetOptions(merge: true));
   }
 
+
+  /// リセット境界（毎日）を超えていたら自動リセットする
+  /// resetHour/resetMinute はローカル時刻基準で扱う
+  Future<bool> ensureDailyResetIfNeeded(String groupId) async {
+    final ref = _db.collection('groups').doc(groupId);
+    final snap = await ref.get();
+    final g = snap.data() ?? {};
+    final settings = (g['settings'] as Map<String, dynamic>?) ?? {};
+    final int rh = (settings['resetHour'] as int?) ?? 4;
+    final int rm = (settings['resetMinute'] as int?) ?? 0;
+
+    final Timestamp? sinceTs = g['gridActiveSince'] as Timestamp?;
+    final DateTime since = (sinceTs?.toDate() ?? DateTime.now()).toLocal();
+
+    DateTime boundaryFor(DateTime dt) {
+      final b = DateTime(dt.year, dt.month, dt.day, rh, rm);
+      if (dt.isBefore(b)) {
+        return b.subtract(const Duration(days: 1));
+      }
+      return b;
+    }
+
+    final nowLocal = DateTime.now();
+    final lastBoundary = boundaryFor(since);
+    final curBoundary = boundaryFor(nowLocal);
+
+    if (curBoundary.isAfter(lastBoundary)) {
+      await manualReset(groupId); // 既存の手動リセットを再利用
+      return true;
+    }
+    return false;
+  }
 
 // 目標時刻（アラームのターゲット）を保存
   Future<void> setAlarmAt({
