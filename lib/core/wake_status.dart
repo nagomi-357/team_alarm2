@@ -1,15 +1,28 @@
 //状態判断
-enum WakeCellStatus { noAlarm, waiting, due, lateSuspicious, posted }
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+enum WakeCellStatus { noAlarm, waiting, due, lateSuspicious, posted,snoozing }
 
 class TodayAlarm {
   final String uid;
   final DateTime? alarmAt;
   final int graceMins;
-  TodayAlarm({required this.uid, required this.alarmAt, required this.graceMins});
+  final DateTime? lastSnoozedAt;
+  final int snoozeMins;
+  TodayAlarm({
+    required this.uid,
+    required this.alarmAt,
+    required this.graceMins,
+    this.lastSnoozedAt,
+    this.snoozeMins = 0,
+  });
+
   factory TodayAlarm.fromMap(String uid, Map<String, dynamic> m) => TodayAlarm(
     uid: uid,
     alarmAt: (m['alarmAt'] as Timestamp?)?.toDate(),
     graceMins: (m['graceMins'] as int?) ?? 10,
+    lastSnoozedAt: (m['lastSnoozedAt'] as Timestamp?)?.toDate(),
+    snoozeMins: (m['snoozeMins'] as int?) ?? 0,
   );
 }
 
@@ -34,6 +47,12 @@ WakeCellStatus computeStatus({
 }) {
   if (post != null) return WakeCellStatus.posted;
   if (alarm == null || alarm.alarmAt == null) return WakeCellStatus.noAlarm;
+
+  if (alarm.lastSnoozedAt != null) {
+    final snoozeEnd = alarm.lastSnoozedAt!.add(Duration(minutes: alarm.snoozeMins));
+    if (now.isBefore(snoozeEnd)) return WakeCellStatus.snoozing;
+  }
+
 
   final due = alarm.alarmAt!;
   final graceEnd = due.add(Duration(minutes: alarm.graceMins));
