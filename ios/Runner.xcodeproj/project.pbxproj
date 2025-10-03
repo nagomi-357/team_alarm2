@@ -18,6 +18,7 @@
 		CE1A45912E86B523002CAA91 /* alarm_onsei1.caf in Resources */ = {isa = PBXBuildFile; fileRef = CE1A45902E86B523002CAA91 /* alarm_onsei1.caf */; };
 		CE2BAAC62E62ADD70011BAC3 /* GoogleService-Info (1).plist in Resources */ = {isa = PBXBuildFile; fileRef = CE2BAAC52E62ADD70011BAC3 /* GoogleService-Info (1).plist */; };
 		CE2BAAC72E62ADD70011BAC3 /* GoogleService-Info (1).plist in Resources */ = {isa = PBXBuildFile; fileRef = CE2BAAC52E62ADD70011BAC3 /* GoogleService-Info (1).plist */; };
+		CE9D02A62E8F74C100590E83 /* alarm_elegant.caf in Resources */ = {isa = PBXBuildFile; fileRef = CE9D02A52E8F74C100590E83 /* alarm_elegant.caf */; };
 		F4289B89320BFFA147C49FF8 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = E6B8D6DCCF33F2D8581AB257 /* GoogleService-Info.plist */; };
 /* End PBXBuildFile section */
 
@@ -66,6 +67,7 @@
 		CDF09DF5AB94429295957A31 /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
 		CE1A45902E86B523002CAA91 /* alarm_onsei1.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = alarm_onsei1.caf; sourceTree = "<group>"; };
 		CE2BAAC52E62ADD70011BAC3 /* GoogleService-Info (1).plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info (1).plist"; sourceTree = "<group>"; };
+		CE9D02A52E8F74C100590E83 /* alarm_elegant.caf */ = {isa = PBXFileReference; lastKnownFileType = file; path = alarm_elegant.caf; sourceTree = "<group>"; };
 		E6B8D6DCCF33F2D8581AB257 /* GoogleService-Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = "GoogleService-Info.plist"; path = "Runner/GoogleService-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -135,6 +137,7 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 				CE1A45902E86B523002CAA91 /* alarm_onsei1.caf */,
+				CE9D02A52E8F74C100590E83 /* alarm_elegant.caf */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -259,6 +262,7 @@
 				3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */,
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
 				97C146FC1CF9000F007C117D /* Main.storyboard in Resources */,
+				CE9D02A62E8F74C100590E83 /* alarm_elegant.caf in Resources */,
 				F4289B89320BFFA147C49FF8 /* GoogleService-Info.plist in Resources */,
 				CE1A45912E86B523002CAA91 /* alarm_onsei1.caf in Resources */,
 			);
