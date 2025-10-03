@@ -1,9 +1,9 @@
 //(必要)data/group_repo.dart(グループ・投稿・アラーム)
 import 'dart:async';
-import 'dart:io';
+//import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+//import 'package:cloud_firestore/cloud_firestore.dart';
 class GroupRepo {
   final _db = FirebaseFirestore.instance;
 
