@@ -21,6 +21,19 @@ class NotificationService {
     const initSettings = InitializationSettings(android: androidInit, iOS: iosInit);
     await _flnp.initialize(initSettings);
 
+    // --- iOS: 明示的に通知許可をリクエストし、状態をログ出力 ---
+    if (Platform.isIOS) {
+      final iosImpl = _flnp.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
+      await iosImpl?.requestPermissions(alert: true, badge: true, sound: true);
+      /*try {
+        final settings = await iosImpl?.getNotificationSettings();
+        // ignore: avoid_print
+        print('[iOS Notification Settings] authorizationStatus=${settings?.authorizationStatus} alert=${settings?.alertSetting} sound=${settings?.soundSetting}');
+      } catch (_) {
+        // iOS plugin 版によっては未サポートのことがあるので握りつぶし
+      }*/
+    }
+
     // Android 13+ の通知許可
     if (Platform.isAndroid) {
       final impl = _flnp.resolvePlatformSpecificImplementation<
@@ -55,13 +68,13 @@ class NotificationService {
       category: AndroidNotificationCategory.alarm,
       fullScreenIntent: true,
       playSound: true,
-      sound: const RawResourceAndroidNotificationSound('alarm_onsei1'),
+      sound: const RawResourceAndroidNotificationSound('alarm_elegant'),
       audioAttributesUsage: AudioAttributesUsage.alarm,
       visibility: NotificationVisibility.public,
     );
 
     const iosDetails = DarwinNotificationDetails(
-      sound: 'alarm_onsei1.caf', // iOSは拡張子付き
+      sound: 'alarm_elegant.caf', // iOSは拡張子付き
       interruptionLevel: InterruptionLevel.timeSensitive,
       presentAlert: true,
       presentSound: true,
@@ -84,6 +97,37 @@ class NotificationService {
       uiLocalNotificationDateInterpretation:
       UILocalNotificationDateInterpretation.wallClockTime,
     );
+
+    // iOS only: chain a few follow-up notifications (~10s apart) to extend audible duration on Home/Lock.
+    if (Platform.isIOS) {
+      final iosDetailsFollow = const DarwinNotificationDetails(
+        sound: 'alarm_elegant.caf',
+        interruptionLevel: InterruptionLevel.timeSensitive,
+        presentAlert: true,
+        presentSound: true,
+      );
+      final n1 = scheduled.add(const Duration(seconds: 10));
+      final n2 = scheduled.add(const Duration(seconds: 20));
+      // Use offset IDs to avoid clobbering the base one; caller may cancel(id) and optionally cancel(id+1, id+2)
+      await _flnp.zonedSchedule(
+        id + 1,
+        title,
+        body,
+        n1,
+        NotificationDetails(android: androidDetails, iOS: iosDetailsFollow),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.wallClockTime,
+      );
+      await _flnp.zonedSchedule(
+        id + 2,
+        title,
+        body,
+        n2,
+        NotificationDetails(android: androidDetails, iOS: iosDetailsFollow),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.wallClockTime,
+      );
+    }
   }
 
   Future<void> cancel(int id) => _flnp.cancel(id);
@@ -100,15 +144,16 @@ class NotificationService {
       category: AndroidNotificationCategory.alarm,
       fullScreenIntent: true,
       playSound: true,
-      sound: const RawResourceAndroidNotificationSound('alarm_onsei1'),
+      sound: const RawResourceAndroidNotificationSound('alarm_elegant'),
       audioAttributesUsage: AudioAttributesUsage.alarm,
     );
 
     const ios = DarwinNotificationDetails(
-      sound: 'alarm_onsei1.caf',
-      interruptionLevel: InterruptionLevel.timeSensitive,
       presentAlert: true,
       presentSound: true,
+      interruptionLevel: InterruptionLevel.timeSensitive,
+      // sound はまずデフォルトで切り分け、問題なければ 'alarm_onsei1.caf' に差し替える
+      // sound: 'alarm_onsei1.caf',
     );
 
     await _flnp.show(
@@ -147,12 +192,12 @@ class NotificationService {
       category: AndroidNotificationCategory.alarm,
       fullScreenIntent: true,
       playSound: true,
-      sound: const RawResourceAndroidNotificationSound('alarm_onsei1.caf'),
+      sound: const RawResourceAndroidNotificationSound('alarm_onsei1'),
       audioAttributesUsage: AudioAttributesUsage.alarm,
     );
 
     const i = DarwinNotificationDetails(
-      sound: 'alarm_onsei1.caf',
+      sound: 'alarm_elegant.caf',
       interruptionLevel: InterruptionLevel.timeSensitive,
       presentAlert: true,
       presentSound: true,
@@ -168,6 +213,35 @@ class NotificationService {
       uiLocalNotificationDateInterpretation:
       UILocalNotificationDateInterpretation.wallClockTime,
     );
+
+    if (Platform.isIOS) {
+      const iosFollow = DarwinNotificationDetails(
+        sound: 'alarm_elegant.caf',
+        interruptionLevel: InterruptionLevel.timeSensitive,
+        presentAlert: true,
+        presentSound: true,
+      );
+      final n1 = next.add(const Duration(seconds: 10));
+      final n2 = next.add(const Duration(seconds: 20));
+      await _flnp.zonedSchedule(
+        id + 1,
+        'スヌーズ',
+        'そろそろ起きる時間です',
+        n1,
+        NotificationDetails(android: a, iOS: iosFollow),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.wallClockTime,
+      );
+      await _flnp.zonedSchedule(
+        id + 2,
+        'スヌーズ',
+        'そろそろ起きる時間です',
+        n2,
+        NotificationDetails(android: a, iOS: iosFollow),
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.wallClockTime,
+      );
+    }
   }
 
   /// 今から [seconds] 秒後にテスト用の正確アラームを設定（動作確認用）
@@ -183,5 +257,25 @@ class NotificationService {
         AndroidFlutterLocalNotificationsPlugin>();
     await androidImpl?.requestNotificationsPermission();
     await androidImpl?.requestExactAlarmsPermission();
+  }
+
+  /// デバッグ用: 権限・保留中通知・表示テストをまとめて実行
+  Future<void> debugDiagnostics() async {
+    // iOS/Android 共通: ペンディングの通知一覧を出力
+    final pending = await _flnp.pendingNotificationRequests();
+    // ignore: avoid_print
+    print('[LocalNotifications] pending=${pending.length} ids=${pending.map((e) => e.id).toList()}');
+
+    // 直ちに1件表示（バナー＋サウンド）
+    await showNowTest();
+
+    // 数秒後アラームも設定
+    await scheduleAfterSeconds(id: 992, seconds: 5);
+  }
+
+  Future<void> cancelFamily(int baseId) async {
+    await _flnp.cancel(baseId);
+    await _flnp.cancel(baseId + 1);
+    await _flnp.cancel(baseId + 2);
   }
 }

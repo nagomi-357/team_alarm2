@@ -92,7 +92,7 @@ class _GroupSettingsScreenState extends State<GroupSettingsScreen> {
 
         return Scaffold(
           appBar: AppBar(
-            backgroundColor: Colors.brown.shade800,
+            backgroundColor: Colors.blueGrey.shade800,
             foregroundColor: Theme.of(context).colorScheme.onPrimary,
             title: const Text('グループ設定'),
             actions: [

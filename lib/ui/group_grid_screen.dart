@@ -162,7 +162,7 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
     } catch (_) {}
 
     // 通知を上書き
-    final notifId = widget.groupId.hashCode ^ widget.myUid.hashCode;
+    final notifId = (widget.groupId.hashCode ^ widget.myUid.hashCode) & 0x7fffffff;
     await NotificationService.instance.cancel(notifId);
     await NotificationService.instance.scheduleAlarm(
       id: notifId,
@@ -277,7 +277,7 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
                                     groupId: widget.groupId)));
                       }),
                       IconButton(
-                        icon: const Icon(Icons.settings ),
+                        icon: const Icon(Icons.settings),
                         onPressed: () async {
                           final updated = await Navigator.push(
                             context,
@@ -324,45 +324,49 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
                             }
                           } : null),
 
+                      // ♪ 即時テスト（showNowTestはID固定の可能性があるので、1秒後のスケジュールで代用）
                       IconButton(
                         icon: const Icon(Icons.music_note),
                         tooltip: '即時テスト',
-                        onPressed: () async =>
-                            NotificationService.instance.showNowTest(),
+                        onPressed: () async {
+                          final id = DateTime.now().millisecondsSinceEpoch & 0x7fffffff;
+                          await NotificationService.instance.scheduleAfterSeconds(
+                            id: id,
+                            seconds: 1,
+                          );
+                        },
                       ),
 
-                      // 🔔 5秒後アラームテスト
+// 🔔 5秒後アラームテスト（毎回ユニークID）
                       IconButton(
                         icon: const Icon(Icons.alarm_add),
                         tooltip: '5秒後にアラーム',
                         onPressed: () async {
-                          final nowPlus10 = DateTime.now().add(
-                              const Duration(seconds: 5));
+                          final id = DateTime.now().millisecondsSinceEpoch & 0x7fffffff; // ユニーク
+                          final at = DateTime.now().add(const Duration(seconds: 5));
                           await NotificationService.instance.scheduleAlarm(
-                            id: 999, // テスト用の任意ID
-                            at: nowPlus10,
+                            id: id,
+                            at: at,
                             title: 'テストアラーム',
                             body: '5秒後に鳴りました',
                           );
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text(
-                                  '5秒後にアラームをセットしました')),
+                              const SnackBar(content: Text('5秒後にアラームをセットしました')),
                             );
                           }
                         },
                       ),
 
-                      // ⏹ アラーム取り消し（任意）
+// ⏹ アラーム取り消し（直前の固定IDが無いので、必要なら個別にIDを覚えてcancelしてください）
                       IconButton(
                         icon: const Icon(Icons.notifications_off),
-                        tooltip: 'テストアラーム取消',
+                        tooltip: '（例）固定ID999の取消',
                         onPressed: () async {
-                          await NotificationService.instance.cancel(999);
+                          await NotificationService.instance.cancel(999); // 例：固定IDを使っている箇所があれば消せます
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text(
-                                  'テストアラームを取り消しました')),
+                              const SnackBar(content: Text('テストアラームを取り消しました')),
                             );
                           }
                         },
@@ -664,7 +668,7 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
     await repo.incrementSnooze(widget.groupId, widget.myUid, _settings.snoozeStepMins);
 
     // 2) ローカル通知: 現在 + スヌーズ間隔 で再スケジュール
-    final nid = widget.groupId.hashCode ^ widget.myUid.hashCode;
+    final nid = (widget.groupId.hashCode ^ widget.myUid.hashCode) & 0x7fffffff;
     final next = DateTime.now().add(Duration(minutes: _settings.snoozeStepMins));
     await NotificationService.instance.cancel(nid);
     await NotificationService.instance.scheduleAlarm(id: nid, at: next, title: 'スヌーズ', body: 'そろそろ起きる時間です');
@@ -844,6 +848,15 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
         SnackBar(content: Text('目標 ${DateFormat('HH:mm').format(
             newAlarmAt)} に再設定しました（投稿・起床時刻をリセット）')),
       );
+
+      final notifId = (widget.groupId.hashCode ^ widget.myUid.hashCode) & 0x7fffffff;
+      await NotificationService.instance.cancel(notifId);
+      await NotificationService.instance.scheduleAlarm(
+        id: notifId,
+        at: newAlarmAt,
+        title: '起床時間です',
+        body: 'おはようを投稿しましょう',
+      );
     }
 
 
@@ -1019,7 +1032,7 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
       }
 
       // アラーム通知を停止（起きたので）
-      final nid = widget.myUid.hashCode ^ widget.groupId.hashCode;
+      final nid = (widget.myUid.hashCode ^ widget.groupId.hashCode) & 0x7fffffff;
       await NotificationService.instance.cancel(nid);
 
       if (!mounted) return;

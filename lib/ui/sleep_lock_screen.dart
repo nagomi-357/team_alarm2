@@ -14,6 +14,8 @@ import '../data/timeline_repo.dart';
 import '../data/user_repo.dart';
 import '../notifications/notification_service.dart';
 import 'group_grid_screen.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:audio_session/audio_session.dart';
 
 class SleepLockScreen extends StatefulWidget {
   const SleepLockScreen({
@@ -34,7 +36,9 @@ class SleepLockScreen extends StatefulWidget {
 }
 
 class _SleepLockScreenState extends State<SleepLockScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
+  // --- Alarm audio (loop while on this screen) ---
+  late final AudioPlayer _alarmPlayer;
   // 重複ナビゲーション抑止用フラグ
   bool _navigatedBack = false;
   final repo = GroupRepo();
@@ -64,10 +68,15 @@ class _SleepLockScreenState extends State<SleepLockScreen>
     // 回転リング用コントローラ（デフォルト10秒周期で確実に回す）
     ringCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 5))
       ..repeat();
+    WidgetsBinding.instance.addObserver(this);
+    // Alarm player: initialize only (do NOT start here)
+    _alarmPlayer = AudioPlayer();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    try { _alarmPlayer.dispose(); } catch (_) {}
     _ticker?.cancel();
     bgCtrl.dispose();
     ringCtrl.dispose();
@@ -76,12 +85,44 @@ class _SleepLockScreenState extends State<SleepLockScreen>
     super.dispose();
   }
 
+  Future<void> _startAlarmLoop() async {
+    final session = await AudioSession.instance;
+    await session.configure(const AudioSessionConfiguration.music());
+    try {
+      await _alarmPlayer.setAsset('assets/audio/alarm_elegant.caf');
+      await _alarmPlayer.setLoopMode(LoopMode.one);
+      await _alarmPlayer.play();
+    } catch (e) {
+      // ignore: avoid_print
+      print('alarm loop error: $e');
+    }
+  }
+
+  Future<void> _stopAlarmLoop() async {
+    try { await _alarmPlayer.stop(); } catch (_) {}
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!mounted) return;
+    if (state == AppLifecycleState.resumed) {
+      // App came to foreground; if due and not snoozing, ensure loop is running
+      if (_wasDue && !_localSnoozing) {
+        // If player is not already playing, (re)start
+        if (!_alarmPlayer.playing) {
+          _startAlarmLoop();
+        }
+      }
+    }
+  }
+
   Future<void> _handleWake() async {
+    await _stopAlarmLoop(); // stop continuous alarm sound
     // 既存起床フローの呼び出し
     await repo.postOhayo(widget.groupId, widget.myUid);
     await repo.setWakeAt(groupId: widget.groupId, uid: widget.myUid, wakeAt: DateTime.now());
-    await NotificationService.instance
-        .cancel(widget.myUid.hashCode ^ widget.groupId.hashCode);
+    final _nid = (widget.myUid.hashCode ^ widget.groupId.hashCode) & 0x7fffffff;
+    await NotificationService.instance.cancel(_nid);
     await tl.log(widget.groupId, {'type': 'wake', 'uid': widget.myUid});
     // ロック解除
     await UserRepo().setSleepLocked(uid: widget.myUid, locked: false);
@@ -116,9 +157,10 @@ class _SleepLockScreenState extends State<SleepLockScreen>
   Future<void> _handleSnooze() async {
     if (_localSnoozing) return; // already processed
     setState(() => _localSnoozing = true);
+    await _stopAlarmLoop(); // stop current loop when user snoozes
     // 既存スヌーズフローの呼び出し
     await repo.incrementSnooze(widget.groupId, widget.myUid, widget.settings.snoozeStepMins);
-    final nid = widget.groupId.hashCode ^ widget.myUid.hashCode;
+    final nid = (widget.groupId.hashCode ^ widget.myUid.hashCode) & 0x7fffffff;
     final next = DateTime.now().add(Duration(minutes: widget.settings.snoozeStepMins));
     await NotificationService.instance.cancel(nid);
     await NotificationService.instance.scheduleAlarm(
@@ -167,12 +209,35 @@ class _SleepLockScreenState extends State<SleepLockScreen>
               if (_wasDue != isDue) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (!mounted) return;
+                  // Start/stop in-app alarm loop on due-state transitions
+                  if (!_wasDue && isDue) {
+                    // Entered due: begin continuous loop playback
+                    _startAlarmLoop(); // fire-and-forget for responsiveness
+                  } else if (_wasDue && !isDue) {
+                    // Left due: stop playback
+                    _stopAlarmLoop();
+                  }
                   setState(() {
                     _wasDue = isDue;
                     if (!isDue) _localSnoozing = false; // left due: allow future snooze on next alarm
                   });
                 });
               }
+
+              // Safety: if currently due but player is not running (and not in a snooze press), start it.
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                if (isDue && !_localSnoozing) {
+                  if (!_alarmPlayer.playing) {
+                    _startAlarmLoop();
+                  }
+                } else {
+                  // Not due: ensure stopped
+                  if (_alarmPlayer.playing) {
+                    _stopAlarmLoop();
+                  }
+                }
+              });
 
               // リングの速度（近づくほど加速）
               final mins = (myAlarmAt != null) ? myAlarmAt.difference(_now).inMinutes : 9999;
