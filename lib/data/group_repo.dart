@@ -3,6 +3,7 @@ import 'dart:async';
 //import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import '../models/group_summary.dart';
 //import 'package:cloud_firestore/cloud_firestore.dart';
 class GroupRepo {
   final _db = FirebaseFirestore.instance;
@@ -165,6 +166,10 @@ class GroupRepo {
           .set({
         'snoozing': false
       }, SetOptions(merge: true));
+
+  Stream<List<GroupSummary>> groupsForUserStream(String uid) =>
+      _db.collection('groups').where('members', arrayContains: uid).snapshots()
+          .map((qs) => qs.docs.map(GroupSummary.fromDoc).toList());
 
   Future<void> postOhayo(String groupId, String uid, {String? photoUrl}) async {
     await _db

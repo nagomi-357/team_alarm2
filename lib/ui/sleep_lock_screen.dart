@@ -137,6 +137,7 @@ class _SleepLockScreenState extends State<SleepLockScreen>
               groupId: widget.groupId,
               myUid: widget.myUid,
               memberUids: widget.memberUids,
+              availableGroups: const [],
             ),
           ),
         );
@@ -147,6 +148,7 @@ class _SleepLockScreenState extends State<SleepLockScreen>
               groupId: widget.groupId,
               myUid: widget.myUid,
               memberUids: widget.memberUids,
+              availableGroups: const [],
             ),
           ),
         );

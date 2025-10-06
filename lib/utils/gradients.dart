@@ -19,3 +19,24 @@ List<Color> getGradientColors(WakeCellStatus status) {
   }
   return [Color(0xFF9E9E9E), Color(0xFF424242)]; // fallback (未設定と同じ)
 }
+
+
+const Color kAccentNoAlarm        = Color(0xFF737B87); // grey
+const Color kAccentWaiting        = Color(0xFF5BA7FF); // blue
+const Color kAccentDue            = Color(0xFFFFC63A); // amber
+const Color kAccentLateSuspicious = Color(0xFFFF6B6B); // red
+const Color kAccentSnoozing       = Color(0xFFFFC63A); // amber
+const Color kAccentPosted         = Color(0xFF7EE2A8); // green
+
+// Timeline-only accent for "cheer" (distinct from wake/posted)
+const Color kAccentCheer          = Color(0xFFBA68C8); // lavender
+
+/// Single source of truth: grid/timeline accent color by status
+Color tileAccentColor(WakeCellStatus status) => switch (status) {
+  WakeCellStatus.noAlarm        => kAccentNoAlarm,
+  WakeCellStatus.waiting        => kAccentWaiting,
+  WakeCellStatus.due            => kAccentDue,
+  WakeCellStatus.lateSuspicious => kAccentLateSuspicious,
+  WakeCellStatus.snoozing       => kAccentSnoozing,
+  WakeCellStatus.posted         => kAccentPosted,
+};

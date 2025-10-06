@@ -46,9 +46,17 @@ class QRJoinScreen extends StatelessWidget {
     final members = List<String>.from((gdoc.data()?['members'] as List?) ?? const []);
 
     if (context.mounted) {
-      Navigator.pushReplacement(context, MaterialPageRoute(
-        builder: (_) => GroupGridScreen(groupId: gid, myUid: uid, memberUids: members),
-      ));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => GroupGridScreen(
+            groupId: gid,
+            myUid: uid,
+            memberUids: members,
+            availableGroups: const [], // pass empty summaries to satisfy required param
+          ),
+        ),
+      );
     }
     return true;
   }

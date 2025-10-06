@@ -376,7 +376,12 @@ class _GroupList extends StatelessWidget {
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => GroupGridScreen(groupId: d.id, myUid: myUid, memberUids: members),
+                    builder: (_) => GroupGridScreen(
+                      groupId: d.id,
+                      myUid: myUid,
+                      memberUids: members,
+                      availableGroups: const [],
+                    ),
                   ),
                 ),
               ),

@@ -10,6 +10,8 @@ import 'ui/group_list_screen.dart';
 import 'ui/profile/profile_screen.dart';
 import 'ui/invite/qr_join_screen.dart';
 import 'notifications/notification_service.dart';
+import 'data/group_repo.dart';
+import 'models/group_summary.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

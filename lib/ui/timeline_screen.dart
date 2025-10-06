@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../data/user_repo.dart';
 import 'package:team_alarm1_2/core/wake_cell_status.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:team_alarm1_2/utils/gradients.dart';
 
 class TimelineScreen extends StatefulWidget {
@@ -23,7 +24,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
       case 'snooze': return WakeCellStatus.snoozing;       // スヌーズ
       case 'nudge':  return WakeCellStatus.lateSuspicious; // まだ起きてない（猶予超過に近い扱い）
       case 'reset':  return WakeCellStatus.noAlarm;        // リセットはニュートラル
-      case 'cheer':  return WakeCellStatus.posted;         // エールは前向き＝緑系に寄せる
+      case 'cheer':  return WakeCellStatus.posted;         // エールは緑系扱い（色はラベンダーに上書き）
       default:       return WakeCellStatus.noAlarm;
     }
   }
@@ -77,17 +78,28 @@ class _TimelineScreenState extends State<TimelineScreen> {
         return 'reset';
     }
 
+    if (s == 'post' || s == 'posted' || s == 'checkin' || s == 'check-in') return 'wake';
+    if (s == 'ring' || s == 'alarm' || s == 'alarm_ring' || s == 'alarmring' || s == 'alarm_start') return 'snooze';
+
+    // 目標/アラーム設定系 → waiting 扱い（= sleep 系色: blue）
+    if (s == 'set' || s == 'set_alarm' || s == 'alarm_set' || s == 'settime' || s == 'set_time' || s == 'schedule' || s == 'scheduled' || s == 'goal_set' || s == 'set_goal') return 'sleep';
+
+    // 遅刻/超過検知系 → nudge（= red）
+    if (s == 'late' || s == 'overdue' || s == 'delayed') return 'nudge';
+
     // ---- ここから部分一致のフォールバック ----
     if (s.contains('sleep')) return 'sleep';
     if (s.contains('snooz')) return 'snooze';
     if (s.contains('wake')) return 'wake';
     if (s.contains('cheer') || s.contains('encour')) return 'cheer';
     if (s.contains('nudge') || s.contains('poke') || s.contains('remind')) return 'nudge';
+    if (s.contains('set') || s.contains('schedule') || s.contains('goal')) return 'sleep';
+    if (s.contains('overdue') || s.contains('late') || s.contains('delay')) return 'nudge';
 
     return 'event';
   }
-  final _sc = ScrollController();
 
+  final _sc = ScrollController();
   bool _didInitialAutoScroll = false;
 
   void _scrollToBottom({bool animate = true}) {
@@ -100,11 +112,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
     }
   }
 
-  // === Aramo & latest state ===
-  String? _aramoPhrase;      // 最新イベントのコメント文（コメントのみ）
-  String? _latestEventId;    // 最新イベントID（ハイライト/バブル追従）
+  // === 最新状態管理 ===
   Timestamp? _latestEventTs; // 最新イベントの createdAt
-
   int _newBadgeCount = 0;    // 画面が最下部でない時の新着件数
   bool _atBottom = true;     // 今、最下部付近かどうか
 
@@ -146,7 +155,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
       child: Scaffold(
         appBar: AppBar(
           automaticallyImplyLeading: false,
-
           backgroundColor: Colors.transparent,
           elevation: 0,
           foregroundColor: Colors.white,
@@ -158,6 +166,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
                 colors: [Color(0xFF0B0F12), Color(0xFF0E1B2A)],
               ),
             ),
+          ),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(66),
+            child: _OverdueStrip(groupId: widget.groupId),
           ),
         ),
         backgroundColor: Colors.transparent,
@@ -212,6 +224,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       // createdAt が無い/不正なら表示しない
                       return false;
                     }).toList();
+
                     if (!_didInitialAutoScroll) {
                       WidgetsBinding.instance.addPostFrameCallback((_) {
                         _didInitialAutoScroll = true;
@@ -226,31 +239,18 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       );
                     }
 
-                    // === 新着イベント検出：最新ID/TSとアラモ文面を更新（常時保持）
+                    // === 新着イベント検出（末尾=最新） ===
                     final latest = docs.last; // createdAt 昇順の最後尾
-                    final data = latest.data();
-                    final ts = data['createdAt'];
-                    final type = _normalizeType((data['type'] as String?) ?? 'event');
+                    final latestData = latest.data();
+                    final ts = latestData['createdAt'];
                     if (ts is Timestamp) {
                       final isNewer = (_latestEventTs == null) || ts.compareTo(_latestEventTs!) > 0;
                       if (isNewer) {
                         _latestEventTs = ts;
-                        _latestEventId = latest.id;
-
-                        // コメントのみ（アイコン/時刻なし）
-                        final p = _pickPhraseForEvent(type, latest.id, ts.toDate()) ?? '';
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (!mounted) return;
-                          setState(() {
-                            _aramoPhrase = p; // 次の新着まで残す
-                          });
-                        });
-
                         // 追従スクロール：最下部付近にいるときだけ自動で末尾へ
                         if (_atBottom) {
                           WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
                         }
-
                         if (!_atBottom) {
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             if (mounted) setState(() => _newBadgeCount += 1);
@@ -259,7 +259,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                       }
                     }
 
-                    // UIリスト
+                    // UIリスト（LINE風・左右バブル）
                     return Stack(
                       children: [
                         ListView.separated(
@@ -269,244 +269,205 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           separatorBuilder: (_, __) => const SizedBox(height: 8),
                           itemBuilder: (context, i) {
                             final e = docs[i].data();
-                            final type = _normalizeType(((e['type'] as String?) ?? 'event'));
+                            final dynamic _rawAny = (e['type'] ?? e['status'] ?? e['action'] ?? e['eventType'] ?? e['event'] ?? e['name'] ?? e['verb'] ?? e['kind']);
+                            final String rawType = (_rawAny is String && _rawAny.isNotEmpty) ? _rawAny : 'event';
+                            final type = _normalizeType(rawType);
                             // reset はタイムラインには表示しない（通知は別途発火）
                             if (type == 'reset') {
                               return const SizedBox.shrink();
                             }
+
                             final ts = e['createdAt'];
-                            final timeLabel = (ts is Timestamp)
-                                ? DateFormat('HH:mm').format(ts.toDate())
-                                : '';
+                            final dt = (ts is Timestamp) ? ts.toDate() : null;
+                            final timeLabel = (dt != null) ? DateFormat('HH:mm').format(dt) : '';
 
-                            final by = _actorId(e);
-                            final to = _targetId(e);
+                          final by = _actorId(e);
+                          final to = _targetId(e);
+                          final myUid = FirebaseAuth.instance.currentUser?.uid;
+                          final isMine = (by != null && myUid != null && by == myUid);
+                          final isLatest = (docs[i].id == docs.last.id); // 表示範囲の最後尾が最新
 
-                            final profilesStream = UserRepo().profilesByUids(
-                              [if (by != null) by!, if (to != null) to!],
-                            );
+                          final toNameFromEvent = (e['toName'] as String?)?.trim();
 
-                            return StreamBuilder<Map<String, Map<String, dynamic>>>(
-                              stream: profilesStream,
-                              builder: (context, profSnap) {
-                                final profiles = profSnap.data ?? const {};
-                                final profBy = (by != null) ? profiles[by] : null;
-                                final displayName = (profBy?['displayName'] as String?) ?? (by ?? 'someone');
-                                final icon = _compactIcon(type);
-                                final text = _compactText(
-                                  type,
-                                  displayName,
-                                  toName: (to != null)
-                                      ? ((profiles[to]?['displayName'] as String?) ?? to)
-                                      : null,
-                                );
+                          // by が無いイベントでも描画は継続（someone でフォールバック）
+                          final bool _hasBy = (by != null && by!.isNotEmpty);
 
-                                final isLatest = (docs[i].id == _latestEventId);
-                                final tsDate = (ts is Timestamp) ? ts.toDate() : null;
-                                final fallback = _pickPhraseForEvent(type, docs[i].id, tsDate) ?? '';
-                                final bubbleText = _aramoPhrase ?? fallback; // コメントのみ
+                          // --- 非ブロッキング：まずイベント埋め込みで即表示、到着したプロフィールで追い差し替え ---
+                          String _fallbackName() {
+                            final embed = (e['byDisplayName'] as String?)?.trim();
+                            if (embed != null && embed.isNotEmpty) return embed;
+                            if (_hasBy) return by!;
+                            return 'someone';
+                          }
 
-                                // ===== 非最新：灰色背景 + 小アラモ（偶数=左／奇数=右） =====
-                                if (!isLatest) {
-                                  return AnimatedContainer(
-                                    duration: const Duration(milliseconds: 220),
-                                    curve: Curves.easeOut,
-                                    child: Row(
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      children: [
-                                        if (i % 2 == 0) _userSideIcon(profBy, size: 40), // カード外・左
-                                        if (i % 2 == 0) const SizedBox(width: 8),
+                          String? _fallbackPhoto() {
+                            // イベントに埋め込まれていそうなキーを広めにサポート
+                            final keys = ['byPhotoUrl', 'byPhotoURL', 'photoUrl', 'photoURL', 'avatarUrl', 'iconUrl', 'picture'];
+                            for (final k in keys) {
+                              final v = e[k];
+                              if (v is String && v.trim().isNotEmpty) return v.trim();
+                            }
+                            return null;
+                          }
 
-                                        // カード本体（灰色のはっきり背景）
-                                        Flexible(
-                                          fit: FlexFit.loose,
-                                          child: ConstrainedBox(
-                                            constraints: BoxConstraints(
-                                              maxWidth: MediaQuery.of(context).size.width * 0.73,
-                                            ),
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                color: const Color(0xFF1F2730),
-                                                borderRadius: BorderRadius.circular(10),
-                                                border: Border.all(color: Colors.white12),
-                                              ),
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                              child: ListTile(
-                                                leading: icon,
-                                                title: Text(
-                                                  text,
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: const TextStyle(color: Colors.white),
-                                                ),
-                                                trailing: Text(timeLabel, style: const TextStyle(color: Colors.white70)),
-                                                dense: true,
-                                                visualDensity: VisualDensity(horizontal: 0, vertical: -4),
-                                                minLeadingWidth: 28,
-                                                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                                                tileColor: Colors.transparent,
-                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
+                          final byStream = _hasBy
+                              ? UserRepo().userDocStream(by!)
+                              : const Stream<Map<String, dynamic>?>.empty();
 
-                                        if (i % 2 == 1) const SizedBox(width: 8),
-                                        if (i % 2 == 1) _userSideIcon(profBy, size: 40), // カード外・右
-                                      ],
-                                    ),
-                                  );
+                            return StreamBuilder<Map<String, dynamic>?>(
+                              stream: byStream,
+                              builder: (context, snapBy) {
+                                final profBy = snapBy.data;
+                                final photoFromProf = _profilePhotoUrl(profBy);
+
+                                // --- C案：イベント埋め込み優先 → プロフ → フォールバックの順 ---
+                                String displayName = _fallbackName();
+                                final fromEventName = (e['byDisplayName'] as String?)?.trim();
+                                if (fromEventName != null && fromEventName.isNotEmpty) {
+                                  displayName = fromEventName;
+                                } else {
+                                  final fromProfName = (profBy?['displayName'] as String?)?.trim();
+                                  if (fromProfName != null && fromProfName.isNotEmpty) {
+                                    displayName = fromProfName;
+                                  }
                                 }
 
-                                // ===== 最新：イベント色のはっきり背景 + 太枠 + NEW + 右詰めバブル + 大アラモ =====
-                                // ===== 最新：基本は他と同じカード（はっきり背景）＋NEW/でかアラモ/バブルをまとめる枠 =====
-                                final acc   = _accentColor(type);
-                                final gradColors = getGradientColors(_statusForType(type));
+                                String photo = _fallbackPhoto() ?? '';
+                                final fromEventPhoto = ((e['byPhotoUrl'] ?? e['byPhotoURL']) as String?)?.trim();
+                                if (fromEventPhoto != null && fromEventPhoto.isNotEmpty) {
+                                  photo = fromEventPhoto;
+                                } else if (photoFromProf != null && photoFromProf.isNotEmpty) {
+                                  photo = photoFromProf;
+                                }
 
-// まとめ枠（薄く色づけ・境界と影）：イベントカード＋バブル＋でかアラモ＋NEWを一括り
-                                return Padding(
-                                    padding: const EdgeInsets.only(top: 12), // ← 最新の“直前”だけ余白を追加
-                                    child: Container(
-                                  decoration: BoxDecoration(
-                                    color: acc.withOpacity(0.10),                 // 薄い色づけ（まとめ枠）
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(color: acc.withOpacity(0.35), width: 1.4),
-                                    boxShadow: [BoxShadow(color: acc.withOpacity(0.22), blurRadius: 10, offset: const Offset(0, 3))],
-                                  ),
-                                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
-                                  child: Stack(
-                                    clipBehavior: Clip.none,
-                                    children: [
-                                      // 本文：イベントカード（はっきり背景）→ 右詰めの［バブル→でかアラモ］
-                                      Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          // 1) イベントカード（はっきりしたイベント色の背景）※横潰れ回避：カードはフル幅、ユーザーアイコンは重ねる
-                                          Row(
-                                            crossAxisAlignment: CrossAxisAlignment.center,
-                                            children: [
-                                              // 左に固定幅のユーザーアイコン（重ならない）
-                                              SizedBox(width: 48, child: Center(child: _userSideIcon(profBy, size: 40))),
-                                              const SizedBox(width: 8),
-                                              // 右側はカードを Expanded でフルに使う（横潰れ防止）
-                                              Expanded(
-                                                child: Container(
-                                              decoration: BoxDecoration(
-                                                gradient: LinearGradient(
-                                                  begin: Alignment.topLeft,
-                                                  end: Alignment.bottomRight,
-                                                  colors: gradColors,
-                                                ),
-                                                borderRadius: BorderRadius.circular(10),
-                                                border: Border.all(color: Colors.white.withOpacity(0.35), width: 1.0),
-                                              ),
-                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                                  child: ListTile(
-                                                    leading: icon,
-                                                    title: Text(
-                                                      text,
-                                                      maxLines: 1,
-                                                      overflow: TextOverflow.ellipsis,
-                                                      style: const TextStyle(color: Colors.white),
-                                                    ),
-                                                    trailing: Text(timeLabel, style: const TextStyle(color: Colors.white)),
-                                                    dense: true,
-                                                    visualDensity: VisualDensity.compact,
-                                                    minLeadingWidth: 28,
-                                                    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                                                    tileColor: Colors.transparent,
-                                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                                  ),
-                                                ),
-                                              ),
-                                            ],
-                                          ),
+                                // cheer 宛先名はイベント埋め込み・プロフ・uidの順で解決（非ブロッキング）
+                                String resolvedToName = (e['toName'] as String?)?.trim() ?? (e['toDisplayName'] as String?)?.trim() ?? (to ?? '');
 
-                                          // 2) 右詰め：バブル（右向きしっぽ）→ でかアラモ（最右）
-                                          if (bubbleText.isNotEmpty)
-                                            Padding(
-                                              padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-                                              child: Row(
-                                                mainAxisAlignment: MainAxisAlignment.end,
-                                                crossAxisAlignment: CrossAxisAlignment.center,
+                                // --- ターゲットプロフ（to）の非ブロッキング購読：到着後に宛先名を上書き ---
+                                final toStream = (to != null && to!.isNotEmpty)
+                                    ? UserRepo().userDocStream(to!)
+                                    : const Stream<Map<String, dynamic>?>.empty();
+
+                                return StreamBuilder<Map<String, dynamic>?>(
+                                  stream: toStream,
+                                  builder: (context, snapTo) {
+                                    final profTo = snapTo.data;
+                                    final displayTo = (profTo?['displayName'] as String?)?.trim();
+                                    if (displayTo != null && displayTo.isNotEmpty) {
+                                      resolvedToName = displayTo; // イベント埋め込みよりプロフ優先で上書き
+                                    }
+
+                                    // 本文テキスト（to名を最終決定してから生成）
+                                    final bubbleText = _compactText(
+                                      type,
+                                      displayName,
+                                      toName: resolvedToName.isNotEmpty ? resolvedToName : null,
+                                      rawType: rawType,
+                                    );
+
+                                    if (bubbleText.trim().isEmpty) {
+                                      return const SizedBox.shrink();
+                                    }
+
+                                    // 色とバブル
+                                    final borderColor = (type == 'cheer')
+                                        ? kAccentCheer
+                                        : tileAccentColor(_statusForType(type));
+                                    final fillColor = isLatest ? borderColor : Colors.transparent;
+                                    final textColor = Colors.white;
+
+                                    final gradient = _bubbleGradientForType(type);
+                                    final bubble = _eventBubble(
+                                      text: bubbleText,
+                                      borderColor: borderColor,
+                                      fillColor: fillColor,
+                                      textColor: textColor,
+                                      showNewBadge: isLatest,
+                                      badgeOnRight: isMine,
+                                      gradient: gradient,
+                                      isLatest: isLatest,
+                                    );
+
+                                    if (isMine) {
+                                      // 自分：右詰め（名前・アイコンなし）／時刻はバブル左横（下端揃え）
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.end,
+                                          crossAxisAlignment: CrossAxisAlignment.end,
+                                          children: [
+                                            if (timeLabel.isNotEmpty)
+                                              Padding(
+                                                padding: const EdgeInsets.only(right: 6),
+                                                child: Text(
+                                                  timeLabel,
+                                                  style: const TextStyle(color: Colors.white54, fontSize: 11),
+                                                ),
+                                              ),
+                                            ConstrainedBox(
+                                              constraints: BoxConstraints(
+                                                maxWidth: MediaQuery.of(context).size.width * 0.78,
+                                              ),
+                                              child: bubble,
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    } else {
+                                      // 他人：左詰め（アイコン → 名前 → バブル＆右横に時刻（下端合わせ））
+                                      final avatar = (photo.isNotEmpty)
+                                          ? CircleAvatar(radius: 16, backgroundImage: NetworkImage(photo))
+                                          : const CircleAvatar(
+                                              radius: 16,
+                                              backgroundColor: Color(0x33FFFFFF),
+                                              child: Icon(Icons.person, size: 16, color: Colors.white70),
+                                            );
+
+                                      return Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        child: Row(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            avatar,
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
                                                 children: [
-                                                  // バブル：必ず右詰め＆アラモ直左に配置
-                                                  ConstrainedBox(
-                                                    constraints: BoxConstraints(
-                                                      maxWidth: MediaQuery.of(context).size.width * 0.62,
-                                                    ),
-                                                    child: _aramoBubble(bubbleText, tailOnRight: true), // 右向きしっぽ=アラモへ
-                                                  ),
-                                                  const SizedBox(width: 30),
-                                                  // でかアラモ（最右）※ 枠からはみ出さないように左へ平行移動
-                                                  Transform.translate(
-                                                    offset: const Offset(-6, 0),
-                                                    child: Container(
-                                                      width: 104,
-                                                      height: 104,
-                                                      decoration: BoxDecoration(
-                                                        color: Colors.white.withOpacity(0.18),
-                                                        shape: BoxShape.circle,
-                                                        border: Border.all(color: Colors.white.withOpacity(0.6), width: 1.8),
-                                                        boxShadow: const [
-                                                          BoxShadow(color: Colors.black54, blurRadius: 12, offset: Offset(0, 3)),
-                                                        ],
-                                                      ),
-                                                      child: Center(
-                                                        child: Builder(
-                                                          builder: (_) {
-                                                            final photo = _profilePhotoUrl(profBy);
-                                                            if (photo != null && photo.isNotEmpty) {
-                                                              return ClipOval(
-                                                                child: Image.network(
-                                                                  photo,
-                                                                  width: 96,
-                                                                  height: 96,
-                                                                  fit: BoxFit.cover,
-                                                                ),
-                                                              );
-                                                            }
-                                                            return const Icon(Icons.alarm, color: Colors.white, size: 60);
-                                                          },
+                                                  Text(displayName, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                                                  const SizedBox(height: 2),
+                                                  Row(
+                                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                                    children: [
+                                                      ConstrainedBox(
+                                                        constraints: BoxConstraints(
+                                                          maxWidth: MediaQuery.of(context).size.width * 0.72,
                                                         ),
+                                                        child: bubble,
                                                       ),
-                                                    ),
+                                                      if (timeLabel.isNotEmpty)
+                                                        Padding(
+                                                          padding: const EdgeInsets.only(left: 6),
+                                                          child: Text(
+                                                            timeLabel,
+                                                            style: const TextStyle(color: Colors.white54, fontSize: 11),
+                                                          ),
+                                                        ),
+                                                    ],
                                                   ),
                                                 ],
                                               ),
                                             ),
-                                        ],
-                                      ),
-
-                                      // NEW バッジ（左上角に大きく） — 常に最前面になるように最後に配置
-                                      Positioned(
-                                        left: -20,
-                                        top: -35,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                          decoration: BoxDecoration(
-                                            color: acc, // 状態に合わせたアクセント色を背景に
-                                            borderRadius: BorderRadius.circular(8),
-                                            boxShadow: [BoxShadow(color: acc.withOpacity(0.45), blurRadius: 6)],
-                                          ),
-                                          child: Text(
-                                            'NEW',
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.w900,
-                                              fontSize: 18,
-                                              letterSpacing: 1.2,
-                                            ),
-                                          ),
+                                          ],
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                 ),
+                                      );
+                                    }
+                                  },
                                 );
                               },
                             );
                           },
+
                         ),
 
                         // === 「新着」バッジ（最下部でない時に新規イベント到着） ===
@@ -565,14 +526,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
     );
   }
 
-  // 操作者を推論: by ?? uid ?? from
+  // 操作者を推論: by, uid, from, userId, authorId, ownerId
   static String? _actorId(Map<String, dynamic> e) {
-    final by = e['by'];
-    if (by is String && by.isNotEmpty) return by;
-    final uid = e['uid'];
-    if (uid is String && uid.isNotEmpty) return uid;
-    final from = e['from'];
-    if (from is String && from.isNotEmpty) return from;
+    for (final key in ['by', 'uid', 'from', 'userId', 'authorId', 'ownerId']) {
+      final v = e[key];
+      if (v is String && v.isNotEmpty) return v;
+    }
     return null;
   }
 
@@ -583,130 +542,17 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return null;
   }
 
-  // === コメントのみの吹き出し（しっぽの向きを切替できる） ===
-  Widget _aramoBubble(String text, {bool tailOnRight = false}) {
-    const bubbleColor = Color(0xFFFFB74D); // オレンジ（見やすい）
-    const bodyFg = Colors.black87;
-
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        // 本体
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: bubbleColor,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: const [
-              BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 2)),
-            ],
-          ),
-          child: Text(
-            text,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: bodyFg, fontSize: 13, height: 1.25),
-          ),
-        ),
-        // しっぽ：左右端・縦中央に配置してアラモ側へ向ける
-        Positioned(
-          right: tailOnRight ? -7 : null,
-          left: tailOnRight ? null : -7,
-          top: 0,
-          bottom: 0,
-          child: const Center(
-            child: _AramoTail(color: bubbleColor),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ==== サイドに出すユーザーアイコン（Aramo から置き換え） ====
+  // ==== サイドに出すユーザーアイコン（fallback用・他人のみで使用） ====
   String? _profilePhotoUrl(Map<String, dynamic>? p) {
     if (p == null) return null;
     final candidates = [
-      p['photoUrl'], p['photoURL'], p['avatarUrl'], p['iconUrl'], p['photo'], p['imageUrl'],
+      p['photoUrl'], p['photoURL'], p['avatarUrl'], p['iconUrl'],
+      p['photo'], p['imageUrl'], p['avatar'], p['icon'], p['picture'],
     ];
     for (final c in candidates) {
       if (c is String && c.isNotEmpty) return c;
     }
     return null;
-  }
-
-  Widget _userSideIcon(Map<String, dynamic>? profile, {double size = 40}) {
-    final url = _profilePhotoUrl(profile);
-    final border = Border.all(color: Colors.white24, width: (size / 24) * 1.0);
-
-    if (url != null) {
-      return Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: border,
-          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(0, 1))],
-          image: DecorationImage(image: NetworkImage(url), fit: BoxFit.cover),
-        ),
-      );
-    }
-
-    // ← フォールバックは必ず person
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.14),
-        shape: BoxShape.circle,
-        border: border,
-        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(0, 1))],
-      ),
-      alignment: Alignment.center,
-      child: const Icon(Icons.person, size: 18, color: Colors.white70),
-    );
-  }
-
-
-  // === 最新イベントの強調用カラー ===
-  // 枠色（明るめ）
-  Color _accentColor(String t) => switch (t) {
-    'wake'  => const Color(0xFFFFB300), // Amber
-    'sleep' => const Color(0xFF64B5F6), // Light Blue
-    'cheer' => const Color(0xFF81C784), // Light Green
-    'snooze'=> const Color(0xFFFFA726), // Orange
-    'nudge' => const Color(0xFFE57373), // Red-ish
-    'reset' => const Color(0xFFBCAAA4), // Brown/Greige
-    _       => const Color(0xFF90A4AE), // BlueGrey
-  };
-
-  // 背景色（はっきりしたイベント色。白文字が読める濃さを選定）
-  Color _accentBgColor(String t) => switch (t) {
-    'wake'  => const Color(0xFFFF8F00), // Dark Amber
-    'sleep' => const Color(0xFF1976D2), // Strong Blue
-    'cheer' => const Color(0xFF2E7D32), // Strong Green
-    'snooze'=> const Color(0xFFF57C00), // Deep Orange
-    'nudge' => const Color(0xFFD32F2F), // Strong Red
-    'reset' => const Color(0xFF6D4C41), // Brown
-    _       => const Color(0xFF37474F), // BlueGrey
-  };
-
-  // 小アラモ（過去イベント用）
-  // 小アラモ（過去イベント用）— サイズ指定対応
-  Widget _smallAramoIcon({double size = 24}) {
-    final iconSize = (size * 0.58).clamp(10.0, 28.0);
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.14),
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white24, width: (size / 24) * 1.0),
-        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 3, offset: Offset(0, 1))],
-      ),
-      child: Center(
-        child: Icon(Icons.alarm, size: iconSize, color: Colors.white70),
-      ),
-    );
   }
 
   // ===== 読みやすい前景色を背景色から推定 =====
@@ -718,16 +564,28 @@ class _TimelineScreenState extends State<TimelineScreen> {
     return isLight ? Colors.black87 : Colors.white;
   }
 
-// 最新カードだけ：種別→アイコンData（色は _onColor で塗る）
-  IconData _iconData(String t) => switch (t) {
-    'wake'   => Icons.wb_sunny,
-    'sleep'  => Icons.nightlight_round,
-    'cheer'  => Icons.emoji_emotions,
-    'snooze' => Icons.snooze,
-    'nudge'  => Icons.notifications_active,
-    'reset'  => Icons.refresh,
-    _        => Icons.event,
-  };
+  // ===== バブル用グラデーション：グリッド基準（gradients.dart）と完全一致 =====
+  LinearGradient _bubbleGradientForType(String type) {
+    // cheer はアクセント色が独立しているため、ラベンダーを基準に濃淡を作る
+    if (type == 'cheer') {
+      final hsl = HSLColor.fromColor(kAccentCheer);
+      final c1 = hsl.withLightness((hsl.lightness + 0.08).clamp(0.0, 1.0)).toColor();
+      final c2 = hsl.withLightness((hsl.lightness - 0.12).clamp(0.0, 1.0)).toColor();
+      return LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [c1, c2],
+      );
+    }
+    // それ以外は WakeCellStatus によるグリッドのグラデーション配色を使用
+    final status = _statusForType(type);
+    final colors = getGradientColors(status);
+    return LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: colors,
+    );
+  }
 
   // ==== 表示ヘルパ ====
   Icon _compactIcon(String t) => switch (t) {
@@ -740,63 +598,343 @@ class _TimelineScreenState extends State<TimelineScreen> {
     _       => const Icon(Icons.event, size: 20, color: Color(0xFF90A4AE)),
   };
 
-  String _compactText(String type, String name, {String? toName}) {
-    return switch (type) {
-      'wake'  => '$name が起床！',
-      'sleep' => '$name が就寝！',
-      'snooze'=> '$name がスヌーズ！',
-      'cheer' => (toName != null) ? '$name が $toName にエール！' : '$name がエール！',
-      _       => '$name のイベント',
-    };
+  String _compactText(String type, String name, {String? toName, String? rawType}) {
+    switch (type) {
+      case 'wake':
+        return '$name が起床！';
+      case 'sleep':
+        return '$name が就寝！';
+      case 'snooze':
+        return '$name がスヌーズ！';
+      case 'cheer':
+        if (toName != null && toName.isNotEmpty) {
+          return '$name が $toName にエール！';
+        } else {
+          return '$name がエール！';
+        }
+      case 'nudge':
+        return '$name に起床リマインド！';
+      default:
+        // 未知タイプは rawType を人間可読にして表示（"〇〇のイベント" は避ける）
+        final rt = (rawType ?? '').trim();
+        if (rt.isEmpty) return '$name のアクション';
+        final label = _humanizeRawType(rt);
+        return (label.isNotEmpty) ? '$name の$label' : '$name のアクション';
+    }
   }
 
-  // === フレーズ定義（安定選択用） ===
-  static const Map<String, List<Map<String, String>>> _phrases = {
-    'wake': [
-      {'id': 'wake_1', 'text': '起きられたね,いい感じ！'},
-      {'id': 'wake_2', 'text': '今日も頑張ろう！'},
-      {'id': 'wake_3', 'text': '目覚めはどう？'}
-    ],
-    'sleep': [
-      {'id': 'sleep_1', 'text': 'おやすみ〜'},
-      {'id': 'sleep_2', 'text': 'いい夢みてね'},
-      {'id': 'sleep_3', 'text': 'また明日ね'}
-    ],
-    'snooze': [
-      {'id': 'snooze_1', 'text': '気持ちはわかる…'},
-      {'id': 'snooze_2', 'text': 'もうちょっと寝たいよね...'},
-      {'id': 'snooze_3', 'text': '布団の魔力はつよい...'},
-      {'id': 'snooze_3', 'text': 'スヌーズバッチひとつ追加ね...'}
-    ],
-    'cheer': [
-      {'id': 'cheer_1', 'text': 'いいチームだね'},
-      {'id': 'cheer_2', 'text': 'ぼくもエールを送るよ'},
-      {'id': 'cheer_3', 'text': 'ナイスアシスト！'}
-    ],
-    'nudge': [
-      {'id': 'nudge_1', 'text': '時間だよ〜おきて!'},
-      {'id': 'nudge_2', 'text': 'そろそろ起きよう〜'},
-      {'id': 'nudge_3', 'text': 'ファイトだよ'}
-    ],
-    'reset': [
-      {'id': 'reset_1', 'text': '新しいサイクルが始まったよ！'},
-      {'id': 'reset_2', 'text': 'みんな頑張ったね〜'},
-      {'id': 'reset_3', 'text': 'また明日ね'}
-    ],
+  String _humanizeRawType(String rt) {
+    final s = rt.trim();
+    final lower = s.toLowerCase();
+
+    // 代表的な別名を先に握りつぶす
+    const table = {
+      'post': '投稿',
+      'posted': '投稿',
+      'checkin': 'チェックイン',
+      'check-in': 'チェックイン',
+      'ring': 'アラーム',
+      'alarm': 'アラーム',
+      'alarm_ring': 'アラーム',
+      'alarmring': 'アラーム',
+      'alarm_start': 'アラーム',
+      'sleep_start': '就寝',
+      'sleepend': '起床',
+      'sleep_end': '起床',
+      'woke': '起床',
+      'wake_up': '起床',
+      'nudge': 'リマインド',
+      'remind': 'リマインド',
+      'reminder': 'リマインド',
+      'cheer': 'エール',
+      'encourage': 'エール',
+      // 追加: 設定・遅刻系
+      'set': '設定',
+      'set_alarm': '設定',
+      'alarm_set': '設定',
+      'settime': '設定',
+      'set_time': '設定',
+      'schedule': '設定',
+      'scheduled': '設定',
+      'goal_set': '設定',
+      'set_goal': '設定',
+      'late': '遅刻',
+      'overdue': '遅刻',
+      'delayed': '遅刻',
+    };
+
+    if (table.containsKey(lower)) return table[lower]!;
+
+    // スネーク/キャメルをスペースに分割して日本語っぽく整形
+    final snake = lower.replaceAll(RegExp(r'[_\-]+'), ' ');
+    final camel = snake.replaceAllMapped(RegExp(r'([a-z])([A-Z])'), (m) => '${m[1]} ${m[2]}');
+    final words = camel.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    if (words.isEmpty) return '';
+
+    // よくある語の簡易変換
+    final mapped = words.map((w) {
+      switch (w) {
+        case 'wake':
+        case 'woke':
+          return '起床';
+        case 'sleep':
+          return '就寝';
+        case 'snooze':
+          return 'スヌーズ';
+        case 'cheer':
+          return 'エール';
+        case 'nudge':
+        case 'remind':
+        case 'reminder':
+          return 'リマインド';
+        case 'alarm':
+        case 'ring':
+          return 'アラーム';
+        case 'post':
+        case 'posted':
+          return '投稿';
+        case 'checkin':
+        case 'check':
+        case 'in':
+          return 'チェックイン';
+        // 追加: 設定・遅刻系
+        case 'set':
+        case 'schedule':
+        case 'scheduled':
+        case 'goal':
+          return '設定';
+        case 'late':
+        case 'overdue':
+        case 'delayed':
+          return '遅刻';
+        default:
+          return w; // 未知語はそのまま（英語）
+      }
+    }).toList();
+
+    // 先頭だけ使って短く
+    final first = mapped.first;
+    // 英単語のままなら先頭大文字化
+    if (RegExp(r'^[a-z]+$').hasMatch(first)) {
+      return first[0].toUpperCase() + first.substring(1);
+    }
+    return first;
+  }
+
+  // ===（参考）色テーブル：グリッド準拠 + cheerはラベンダー（将来参照用） ===
+  Color _accentColor(String t) => switch (t) {
+    'wake'  => const Color(0xFF7EE2A8), // Grid posted (green)
+    'sleep' => const Color(0xFF5BA7FF), // Grid waiting (blue)
+    'cheer' => const Color(0xFFBA68C8), // Lavender (distinct cheer)
+    'snooze'=> const Color(0xFFFFC63A), // Grid snoozing/due (amber)
+    'nudge' => const Color(0xFFFF6B6B), // Grid lateSuspicious (red)
+    'reset' => const Color(0xFF737B87), // Grid noAlarm (grey)
+    _       => const Color(0xFF90A4AE), // BlueGrey fallback
   };
 
-  // イベントIDと時刻から安定的にフレーズを選ぶ（再描画でも変わらない）
-  String? _pickPhraseForEvent(String type, String eventId, DateTime? at) {
-    final list = _phrases[type];
-    if (list == null || list.isEmpty) return null;
-    // 簡易ハッシュ（eventId + 分単位の時刻）
-    final seed = eventId.codeUnits.fold<int>(0, (p, c) => p + c) + (at != null ? at.millisecondsSinceEpoch ~/ 60000 : 0);
-    final idx = seed.abs() % list.length;
-    return list[idx]['text'];
+  Color _accentBgColor(String t) => switch (t) {
+    'wake'  => const Color(0xFF7EE2A8),
+    'sleep' => const Color(0xFF5BA7FF),
+    'cheer' => const Color(0xFFBA68C8),
+    'snooze'=> const Color(0xFFFFC63A),
+    'nudge' => const Color(0xFFFF6B6B),
+    'reset' => const Color(0xFF737B87),
+    _       => const Color(0xFF90A4AE),
+  };
+  // === バブル（塗り/枠/NEWバッジ） ===
+  Widget _eventBubble({
+    required String text,
+    required Color borderColor,
+    required Color fillColor,
+    required Color textColor,
+    required bool showNewBadge,
+    required bool badgeOnRight,
+    required LinearGradient gradient,
+    required bool isLatest,
+  }) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        if (isLatest)
+          // 最新: 枠も塗りつぶしもグラデーション
+          Container(
+            decoration: BoxDecoration(
+              gradient: gradient,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            padding: const EdgeInsets.all(1.4), // 枠の太さ
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                gradient: gradient,        // 最新は中身もグラデ塗り
+                borderRadius: BorderRadius.circular(12.6),
+              ),
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: textColor,        // 最新も白字に統一
+                  fontSize: 14,
+                  height: 1.3,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          )
+        else
+          // 過去: 枠のみ（単色ボーダー）、中身は透明
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: borderColor, width: 1.4),
+            ),
+            child: Text(
+              text,
+              style: TextStyle(
+                color: textColor,          // 過去は白字
+                fontSize: 14,
+                height: 1.3,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+
+        if (showNewBadge)
+          Positioned(
+            left: -18,
+            right: null,
+            top: -18,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white, // バッジ背景は白
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: borderColor, width: 1.4),
+                boxShadow: [BoxShadow(color: borderColor.withOpacity(0.25), blurRadius: 6)],
+              ),
+              child: Text(
+                'NEW',
+                style: TextStyle(color: borderColor, fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.0),
+              ),
+            ),
+          ),
+      ],
+    );
   }
 }
 
-// しっぽ（菱形）・色指定可
+// === 上部：猶予超過ストリップ（オプショナル） ===
+class _OverdueStrip extends StatelessWidget implements PreferredSizeWidget {
+  final String groupId;
+  const _OverdueStrip({required this.groupId});
+
+  @override
+  Size get preferredSize => const Size.fromHeight(66);
+
+  @override
+  Widget build(BuildContext context) {
+    final db = FirebaseFirestore.instance;
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: db.collection('groups').doc(groupId).snapshots(),
+      builder: (context, snap) {
+        final data = snap.data?.data();
+        final overdue = (data?['overdueUids'] is List)
+            ? List<String>.from(data!['overdueUids'])
+            : const <String>[];
+        if (overdue.isEmpty) {
+          return Container(
+            height: 48,
+            decoration: const BoxDecoration(
+              color: Color(0x161FFFFFF),
+              border: Border(
+                top: BorderSide(color: Colors.white12, width: 0.0),
+                bottom: BorderSide(color: Colors.white12, width: 0.5),
+              ),
+            ),
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: const Text(
+              '遅刻メンバーなし',
+              style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600),
+            ),
+          );
+        }
+        return Container(
+          height: 66,
+          decoration: const BoxDecoration(
+            color: Color(0x161FFFFFF),
+            border: Border(
+              top: BorderSide(color: Colors.white12, width: 0.0),
+              bottom: BorderSide(color: Colors.white12, width: 0.5),
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent),
+              const SizedBox(width: 8),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      ...overdue.map((uid) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: StreamBuilder<Map<String, Map<String, dynamic>>>(
+                          stream: UserRepo().profilesByUids([uid]),
+                          builder: (context, profSnap) {
+                            final prof = profSnap.data?[uid];
+                            final photo = prof?['photoUrl'] ?? prof?['photoURL'] ?? prof?['iconUrl'];
+                            return Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 16,
+                                  backgroundColor: Colors.white24,
+                                  backgroundImage: (photo is String && photo.isNotEmpty) ? NetworkImage(photo) : null,
+                                  child: (photo is String && photo.isNotEmpty) ? null : const Icon(Icons.person, size: 16, color: Colors.white70),
+                                ),
+                                const SizedBox(width: 6),
+                              ],
+                            );
+                          },
+                        ),
+                      )),
+                    ],
+                  ),
+                ),
+              ),
+              // 「◯◯をみんなで起こそう！」（先頭名＋他人数）
+              StreamBuilder<Map<String, Map<String, dynamic>>>(
+                stream: UserRepo().profilesByUids(overdue),
+                builder: (context, profSnap) {
+                  final m = profSnap.data ?? {};
+                  final names = <String>[];
+                  for (final u in overdue) {
+                    final n = (m[u]?['displayName'] as String?) ?? '';
+                    if (n.isNotEmpty) names.add(n);
+                  }
+                  if (names.isEmpty) return const SizedBox.shrink();
+                  final label = names.length == 1 ? names.first : '${names.first} 他${names.length - 1}名';
+                  return Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: Text(
+                      '$label をみんなで起こそう！',
+                      style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.w600),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+// （未使用だが残しておく場合）しっぽ（菱形）
 class _AramoTail extends StatelessWidget {
   final Color color;
   const _AramoTail({required this.color});

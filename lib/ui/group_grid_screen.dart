@@ -20,7 +20,12 @@ import 'sleep_lock_screen.dart';
 import 'group_settings_screen.dart';
 import 'package:team_alarm1_2/utils/gradients.dart';
 import 'dart:ui';
-
+import 'package:intl/intl.dart';
+import '../data/calendar_repo.dart';
+import '../models/group_summary.dart';
+import '../models/group_calendar_event.dart';
+import 'group_calendar_screen.dart';
+import 'widgets/group_bottom_nav.dart';
 
 
 enum _WakeChoice { wakeNow, reschedule }
@@ -29,8 +34,17 @@ enum _DueAction { wake, snooze }
 
 
 class GroupGridScreen extends StatefulWidget {
-  final String groupId; final List<String> memberUids; final String myUid;
-  const GroupGridScreen({super.key, required this.groupId, required this.myUid, required this.memberUids});
+  final String groupId;
+  final List<String> memberUids;
+  final String myUid;
+  final List<GroupSummary> availableGroups;
+  const GroupGridScreen({
+    super.key,
+    required this.groupId,
+    required this.memberUids,
+    required this.myUid,
+    required this.availableGroups,
+  });
   @override State<GroupGridScreen> createState() => _GroupGridScreenState();
 }
 
@@ -38,6 +52,7 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
   final repo = GroupRepo();
   final store = data_storage.StorageRepo();
   final tl = TimelineRepo();
+  final _calendarRepo = CalendarRepo();
 
   DateTime _now = DateTime.now();
   GroupSettings _settings = const GroupSettings(
@@ -209,6 +224,43 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
     return null;
   }
 
+Widget _buildTimelineScreen(NavigatorState navigator) {
+  return TimelineScreen(groupId: widget.groupId);
+}
+
+  GroupCalendarScreen _buildCalendarScreen(NavigatorState navigator) {
+    return GroupCalendarScreen(
+      currentGroupId: widget.groupId,
+      myUid: widget.myUid,
+      availableGroups: widget.availableGroups,
+      onOpenTimeline: () {
+        navigator.popUntil((route) => route.settings.name == null || route.settings.name == 'grid');
+        navigator.push(MaterialPageRoute(
+          settings: const RouteSettings(name: 'timeline'),
+          builder: (_) => _buildTimelineScreen(navigator),
+        ));
+      },
+    );
+  }
+
+  void _openTimeline() {
+    final navigator = Navigator.of(context);
+    navigator.push(MaterialPageRoute(
+      settings: const RouteSettings(name: 'timeline'),
+      builder: (_) => _buildTimelineScreen(navigator),
+    ));
+  }
+
+  void _openCalendar() {
+    final navigator = Navigator.of(context);
+    navigator.push(MaterialPageRoute(
+      settings: const RouteSettings(name: 'calendar'),
+      builder: (_) => _buildCalendarScreen(navigator),
+    ));
+  }
+
+
+
   @override
   Widget build(BuildContext context) {
     final gref = FirebaseFirestore.instance.collection('groups').doc(
@@ -240,6 +292,8 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
               final admins = List<String>.from(
                   (g['admins'] as List?) ?? const[]);
               _isAdmin = admins.contains(widget.myUid);
+              final groupMap = {for (final g in widget.availableGroups) g.id: g};
+
 
               return Container(
                 decoration: const BoxDecoration(
@@ -381,17 +435,31 @@ class _GroupGridScreenState extends State<GroupGridScreen> {
                     selectedItemColor: Colors.white,
                     unselectedItemColor: Colors.white70,
                     items: const [
-                      BottomNavigationBarItem(
-                          icon: Icon(Icons.grid_view), label: ''),
-                      BottomNavigationBarItem(
-                          icon: Icon(Icons.horizontal_split), label: ''),
+                      BottomNavigationBarItem(icon: Icon(Icons.grid_view), label: ''),
+                      BottomNavigationBarItem(icon: Icon(Icons.horizontal_split), label: ''),
+                      BottomNavigationBarItem(icon: Icon(Icons.calendar_month), label: ''),
                     ],
                     currentIndex: 0,
                     onTap: (i) {
                       if (i == 1) {
-                        Navigator.push(context, MaterialPageRoute(
-                            builder: (_) =>
-                                TimelineScreen(groupId: widget.groupId)));
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => TimelineScreen(groupId: widget.groupId),
+                          ),
+                        );
+                      } else if (i == 2) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => GroupCalendarScreen(
+                              currentGroupId: widget.groupId,
+                              myUid: widget.myUid,
+                              availableGroups: widget.availableGroups,
+                              onOpenTimeline: () {},
+                            ),
+                          ),
+                        );
                       }
                     },
                   ),
